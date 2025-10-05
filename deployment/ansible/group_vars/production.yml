@@ -1,0 +1,24 @@
+# Переменные для продакшена
+django_debug: false
+django_allowed_hosts:
+  - "yourdomain.com"
+  - "www.yourdomain.com"
+  - "api.yourdomain.com"
+
+# Продакшен база данных
+db_host: "{{ hostvars['db-server']['ansible_default_ipv4']['address'] | default('localhost') }}"
+
+# SSL настройки
+ssl_enabled: true
+ssl_email: "admin@yourdomain.com"  # Email для Let's Encrypt
+ssl_cert_path: /etc/letsencrypt/live/yourdomain.com/fullchain.pem
+ssl_key_path: /etc/letsencrypt/live/yourdomain.com/privkey.pem
+
+# Мониторинг
+monitoring_enabled: true
+log_level: WARNING
+
+# Бэкапы
+backup_enabled: true
+backup_schedule: "0 2 * * *"  # Каждый день в 2:00
+backup_retention_days: 30

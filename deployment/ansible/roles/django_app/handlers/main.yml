@@ -1,0 +1,6 @@
+---
+- name: restart django
+  systemd:
+    name: django
+    state: restarted
+    enabled: yes

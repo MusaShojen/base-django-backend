@@ -1,0 +1,61 @@
+# Пример конфигурации для всех окружений
+# Скопируйте в all.yml и настройте под свои нужды
+
+# Основные настройки приложения
+app_name: "django_backend"
+app_user: "django"
+app_group: "django"
+app_home: "/opt/{{ app_name }}"
+app_repo: "https://github.com/yourusername/base-python-back.git"
+app_branch: "main"
+
+# Django настройки
+django_secret_key: "your-secret-key-here"
+django_debug: false
+django_allowed_hosts:
+  - "localhost"
+  - "127.0.0.1"
+
+# База данных
+db_name: "{{ app_name }}_db"
+db_user: "{{ app_name }}_user"
+db_password: "your-db-password-here"
+db_host: "localhost"
+db_port: 5432
+
+# Redis
+redis_enabled: true
+redis_password: "your-redis-password-here"
+
+# SSL настройки
+ssl_enabled: false
+ssl_email: "admin@yourdomain.com"
+
+# Мониторинг
+monitoring_enabled: false
+log_level: "INFO"
+
+# Бэкапы
+backup_enabled: true
+backup_retention_days: 30
+backup_s3_bucket: "your-backup-bucket"
+
+# Уведомления
+notification_email: "admin@yourdomain.com"
+notification_slack_webhook: "https://hooks.slack.com/your-webhook"
+
+# Безопасность
+firewall_enabled: true
+fail2ban_enabled: true
+ssh_port: 22
+
+# Производительность
+nginx_worker_processes: "auto"
+nginx_worker_connections: 1024
+gunicorn_workers: 4
+gunicorn_timeout: 30
+
+# Логирование
+log_rotation: true
+log_max_size: "100M"
+log_retention_days: 30

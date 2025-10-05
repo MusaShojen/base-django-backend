@@ -1,0 +1,33 @@
+---
+- name: Install monitoring tools
+  apt:
+    name:
+      - htop
+      - iotop
+      - nethogs
+      - logrotate
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Configure logrotate for Django
+  template:
+    src: django_logrotate.j2
+    dest: /etc/logrotate.d/django
+    owner: root
+    group: root
+    mode: '0644'
+
+- name: Create monitoring script
+  template:
+    src: health_check.sh.j2
+    dest: "{{ app_home }}/health_check.sh"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+
+- name: Setup cron job for health check
+  cron:
+    name: "Django Health Check"
+    minute: "*/5"
+    job: "{{ app_home }}/health_check.sh"
+    user: "{{ app_user }}"

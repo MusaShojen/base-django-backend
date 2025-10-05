@@ -1,0 +1,46 @@
+# Общие переменные для всех серверов
+app_name: django_backend
+app_user: django
+app_group: django
+app_home: /opt/{{ app_name }}
+app_venv: "{{ app_home }}/venv"
+app_repo: "https://github.com/your-username/base-python-back.git"
+app_branch: main
+
+# Python настройки
+python_version: "3.11"
+pip_version: "23.3.1"
+
+# Django настройки
+django_settings_module: "backend.settings"
+django_secret_key: "{{ vault_django_secret_key }}"
+django_debug: false
+django_allowed_hosts:
+  - "{{ ansible_fqdn }}"
+  - "{{ ansible_default_ipv4.address }}"
+
+# База данных
+db_engine: postgresql
+db_name: "{{ app_name }}"
+db_user: "{{ app_name }}_user"
+db_password: "{{ vault_db_password }}"
+db_host: localhost
+db_port: 5432
+
+# Redis (для кеширования)
+redis_enabled: true
+redis_port: 6379
+
+# Nginx настройки
+nginx_worker_processes: auto
+nginx_worker_connections: 1024
+nginx_keepalive_timeout: 65
+
+# SSL настройки
+ssl_enabled: true
+ssl_cert_path: /etc/ssl/certs/{{ app_name }}.crt
+ssl_key_path: /etc/ssl/private/{{ app_name }}.key
+
+# Мониторинг
+monitoring_enabled: true
+log_level: INFO

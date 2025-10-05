@@ -1,0 +1,20 @@
+# Ansible Vault файл с секретами
+# Создать: ansible-vault create vault.yml
+# Редактировать: ansible-vault edit vault.yml
+# Расшифровать: ansible-vault decrypt vault.yml
+
+vault_django_secret_key: "your-super-secret-key-here-change-this"
+vault_db_password: "your-database-password-here"
+vault_green_sms_api_token: "your-green-sms-token-here"
+vault_email_host_password: "your-email-password-here"
+
+# SSL сертификаты (если используете собственные)
+vault_ssl_cert: |
+  -----BEGIN CERTIFICATE-----
+  your-ssl-certificate-here
+  -----END CERTIFICATE-----
+
+vault_ssl_key: |
+  -----BEGIN PRIVATE KEY-----
+  your-ssl-private-key-here
+  -----END PRIVATE KEY-----

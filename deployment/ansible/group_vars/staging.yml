@@ -1,0 +1,16 @@
+# Переменные для staging
+django_debug: true
+django_allowed_hosts:
+  - "staging.yourdomain.com"
+  - "{{ ansible_default_ipv4.address }}"
+
+# Staging база данных (может быть SQLite для простоты)
+db_engine: sqlite
+db_name: "{{ app_home }}/db.sqlite3"
+
+# SSL (самоподписанный для staging)
+ssl_enabled: false
+
+# Мониторинг
+monitoring_enabled: false
+log_level: DEBUG

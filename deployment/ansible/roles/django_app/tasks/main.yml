@@ -1,0 +1,49 @@
+---
+- name: Clone application repository
+  git:
+    repo: "{{ app_repo }}"
+    dest: "{{ app_home }}/app"
+    version: "{{ app_branch }}"
+    update: yes
+  become_user: "{{ app_user }}"
+
+- name: Create environment file
+  template:
+    src: .env.j2
+    dest: "{{ app_home }}/.env"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0600'
+  become_user: "{{ app_user }}"
+
+- name: Run Django migrations
+  command: "{{ app_venv }}/bin/python manage.py migrate"
+  args:
+    chdir: "{{ app_home }}/app"
+  become_user: "{{ app_user }}"
+
+- name: Collect static files
+  command: "{{ app_venv }}/bin/python manage.py collectstatic --noinput"
+  args:
+    chdir: "{{ app_home }}/app"
+  become_user: "{{ app_user }}"
+
+- name: Create superuser (if not exists)
+  command: "{{ app_venv }}/bin/python manage.py shell -c \"from users.models import User; User.objects.filter(phone='+1234567890').exists() or User.objects.create_superuser(phone='+1234567890', username='admin', email='admin@example.com', password='admin123', role='superadmin')\""
+  args:
+    chdir: "{{ app_home }}/app"
+  become_user: "{{ app_user }}"
+  ignore_errors: yes
+
+- name: Create Django systemd service
+  template:
+    src: django.service.j2
+    dest: /etc/systemd/system/django.service
+    owner: root
+    group: root
+    mode: '0644'
+  notify: restart django
+
+- name: Reload systemd daemon
+  systemd:
+    daemon_reload: yes

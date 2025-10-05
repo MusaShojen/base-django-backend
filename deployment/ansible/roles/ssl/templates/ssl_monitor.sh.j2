@@ -1,0 +1,78 @@
+#!/bin/bash
+
+# SSL Certificate Monitor Script
+# Проверяет срок действия SSL сертификатов и отправляет уведомления
+
+LOG_FILE="{{ app_home }}/logs/ssl_monitor.log"
+EMAIL="{{ ssl_email | default('admin@' + ansible_fqdn) }}"
+DOMAINS="{{ django_allowed_hosts | join(' ') }}"
+
+# Функция для логирования
+log() {
+    echo "$(date '+%Y-%m-%d %H:%M:%S'): $1" >> "$LOG_FILE"
+}
+
+# Функция для отправки email (если настроен)
+send_email() {
+    local subject="$1"
+    local body="$2"
+    
+    if command -v mail >/dev/null 2>&1; then
+        echo "$body" | mail -s "$subject" "$EMAIL"
+    fi
+    
+    log "Email sent: $subject"
+}
+
+# Проверка срока действия сертификата
+check_certificate() {
+    local domain="$1"
+    local cert_file="/etc/letsencrypt/live/$domain/fullchain.pem"
+    
+    if [ ! -f "$cert_file" ]; then
+        log "ERROR: Certificate file not found for $domain"
+        return 1
+    fi
+    
+    # Получаем дату истечения сертификата
+    local expiry_date=$(openssl x509 -enddate -noout -in "$cert_file" | cut -d= -f2)
+    local expiry_timestamp=$(date -d "$expiry_date" +%s)
+    local current_timestamp=$(date +%s)
+    local days_until_expiry=$(( (expiry_timestamp - current_timestamp) / 86400 ))
+    
+    log "Certificate for $domain expires in $days_until_expiry days"
+    
+    # Предупреждения
+    if [ $days_until_expiry -le 30 ]; then
+        local subject="SSL Certificate Expiry Warning - $domain"
+        local body="SSL certificate for $domain expires in $days_until_expiry days ($expiry_date). Please renew it soon."
+        
+        send_email "$subject" "$body"
+        log "WARNING: Certificate expires in $days_until_expiry days"
+    elif [ $days_until_expiry -le 7 ]; then
+        local subject="SSL Certificate Expiry Critical - $domain"
+        local body="SSL certificate for $domain expires in $days_until_expiry days ($expiry_date). URGENT: Renew immediately!"
+        
+        send_email "$subject" "$body"
+        log "CRITICAL: Certificate expires in $days_until_expiry days"
+    fi
+    
+    return 0
+}
+
+# Основная функция
+main() {
+    log "Starting SSL certificate check"
+    
+    for domain in $DOMAINS; do
+        # Убираем протокол если есть
+        domain=$(echo "$domain" | sed 's|https\?://||')
+        
+        check_certificate "$domain"
+    done
+    
+    log "SSL certificate check completed"
+}
+
+# Запуск
+main "$@"

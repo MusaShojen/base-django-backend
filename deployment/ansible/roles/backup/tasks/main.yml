@@ -1,0 +1,51 @@
+---
+- name: Create backup directory
+  file:
+    path: "{{ app_home }}/backups"
+    state: directory
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+
+- name: Create database backup script
+  template:
+    src: backup_db.sh.j2
+    dest: "{{ app_home }}/backup_db.sh"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+
+- name: Create application backup script
+  template:
+    src: backup_app.sh.j2
+    dest: "{{ app_home }}/backup_app.sh"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+
+- name: Setup database backup cron
+  cron:
+    name: "Database Backup"
+    minute: "0"
+    hour: "2"
+    job: "{{ app_home }}/backup_db.sh"
+    user: "{{ app_user }}"
+  when: backup_enabled | default(false)
+
+- name: Setup application backup cron
+  cron:
+    name: "Application Backup"
+    minute: "30"
+    hour: "2"
+    job: "{{ app_home }}/backup_app.sh"
+    user: "{{ app_user }}"
+  when: backup_enabled | default(false)
+
+- name: Clean old backups
+  cron:
+    name: "Clean Old Backups"
+    minute: "0"
+    hour: "3"
+    job: "find {{ app_home }}/backups -type f -mtime +{{ backup_retention_days | default(30) }} -delete"
+    user: "{{ app_user }}"
+  when: backup_enabled | default(false)

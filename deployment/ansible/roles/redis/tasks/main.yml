@@ -1,0 +1,28 @@
+---
+- name: Install Redis
+  apt:
+    name: redis-server
+    state: present
+  when: ansible_os_family == "Debian"
+
+- name: Start and enable Redis
+  systemd:
+    name: redis-server
+    state: started
+    enabled: yes
+
+- name: Configure Redis
+  template:
+    src: redis.conf.j2
+    dest: /etc/redis/redis.conf
+    owner: redis
+    group: redis
+    mode: '0640'
+  notify: restart redis
+
+- name: Set Redis memory policy
+  lineinfile:
+    path: /etc/redis/redis.conf
+    regexp: '^maxmemory-policy'
+    line: 'maxmemory-policy allkeys-lru'
+  notify: restart redis

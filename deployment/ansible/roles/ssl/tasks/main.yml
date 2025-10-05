@@ -1,0 +1,91 @@
+---
+- name: Install certbot and nginx plugin
+  apt:
+    name:
+      - certbot
+      - python3-certbot-nginx
+    state: present
+  when: ansible_os_family == "Debian" and ssl_enabled | default(false)
+
+- name: Stop nginx before SSL setup
+  systemd:
+    name: nginx
+    state: stopped
+  when: ssl_enabled | default(false)
+
+- name: Obtain SSL certificate
+  command: >
+    certbot certonly 
+    --standalone 
+    --non-interactive 
+    --agree-tos 
+    --email {{ ssl_email | default('admin@' + ansible_fqdn) }}
+    --domains {{ django_allowed_hosts | join(',') }}
+  register: certbot_result
+  when: ssl_enabled | default(false)
+  ignore_errors: yes
+
+- name: Configure nginx for SSL
+  template:
+    src: nginx_ssl.conf.j2
+    dest: /etc/nginx/sites-available/{{ app_name }}_ssl
+    owner: root
+    group: root
+    mode: '0644'
+  when: ssl_enabled | default(false)
+  notify: restart nginx
+
+- name: Enable SSL site
+  file:
+    src: /etc/nginx/sites-available/{{ app_name }}_ssl
+    dest: /etc/nginx/sites-enabled/{{ app_name }}_ssl
+    state: link
+  when: ssl_enabled | default(false)
+  notify: restart nginx
+
+- name: Remove HTTP site (redirect to HTTPS)
+  file:
+    path: /etc/nginx/sites-enabled/{{ app_name }}
+    state: absent
+  when: ssl_enabled | default(false)
+  notify: restart nginx
+
+- name: Setup automatic renewal
+  cron:
+    name: "SSL Certificate Renewal"
+    minute: "0"
+    hour: "2"
+    job: "certbot renew --quiet --nginx"
+    user: root
+  when: ssl_enabled | default(false)
+
+- name: Test certificate renewal
+  command: certbot renew --dry-run
+  register: renewal_test
+  when: ssl_enabled | default(false)
+  ignore_errors: yes
+
+- name: Create SSL monitoring script
+  template:
+    src: ssl_monitor.sh.j2
+    dest: "{{ app_home }}/ssl_monitor.sh"
+    owner: "{{ app_user }}"
+    group: "{{ app_group }}"
+    mode: '0755'
+  when: ssl_enabled | default(false)
+
+- name: Setup SSL monitoring cron
+  cron:
+    name: "SSL Certificate Monitor"
+    minute: "0"
+    hour: "6"
+    job: "{{ app_home }}/ssl_monitor.sh"
+    user: "{{ app_user }}"
+  when: ssl_enabled | default(false)
+
+- name: Start nginx after SSL setup
+  systemd:
+    name: nginx
+    state: started
+    enabled: yes
+  when: ssl_enabled | default(false)
