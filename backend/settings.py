@@ -152,6 +152,25 @@ CORS_ALLOWED_ORIGINS = [
 
 CORS_ALLOW_CREDENTIALS = True
 
+# Redis настройки
+REDIS_URL = config('REDIS_URL', default='redis://localhost:6379/0')
+
+# Кэширование
+CACHES = {
+    'default': {
+        'BACKEND': 'django_redis.cache.RedisCache',
+        'LOCATION': REDIS_URL,
+        'OPTIONS': {
+            'CLIENT_CLASS': 'django_redis.client.DefaultClient',
+        }
+    }
+}
+
+# Сессии в Redis
+SESSION_ENGINE = 'django.contrib.sessions.backends.cache'
+SESSION_CACHE_ALIAS = 'default'
+SESSION_COOKIE_AGE = 86400  # 24 часа
+
 # Green SMS API settings
 GREEN_SMS_API_URL = config('GREEN_SMS_API_URL', default='https://api.green-api.com')
 GREEN_SMS_API_TOKEN = config('GREEN_SMS_API_TOKEN', default='')

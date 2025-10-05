@@ -20,6 +20,7 @@ from .serializers import (
 )
 from .services import GreenSMSService
 from .decorators import require_roles
+from .cache_utils import CacheManager, RateLimiter, SMSVerificationCache
 
 
 @swagger_auto_schema(
@@ -64,11 +65,26 @@ def send_verification_code(request):
     if serializer.is_valid():
         phone = serializer.validated_data['phone']
         
+        # Проверяем rate limiting
+        if not RateLimiter.check_rate_limit(phone, limit=5, window=3600):
+            return Response({
+                'error': 'Превышен лимит запросов. Попробуйте позже.'
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        
+        # Проверяем количество попыток
+        if not SMSVerificationCache.increment_attempts(phone, max_attempts=5):
+            return Response({
+                'error': 'Превышено максимальное количество попыток. Попробуйте через час.'
+            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        
         # Отправляем SMS код
         sms_service = GreenSMSService()
         sms_verification = sms_service.send_verification_code(phone)
         
         if sms_verification:
+            # Сохраняем код в Redis
+            SMSVerificationCache.store_verification_code(phone, sms_verification.code)
+            
             return Response({
                 'message': 'Код подтверждения отправлен на ваш номер телефона',
                 'phone': phone
