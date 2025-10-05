@@ -11,7 +11,15 @@ urlpatterns = [
     path('check-telegram/', views.check_telegram_availability, name='check_telegram_availability'),
     path('balance-info/', views.get_balance_info, name='get_balance_info'),
     
-    # Аутентификация
+    # Многоэтапная регистрация
+    path('complete-registration/', views.complete_registration, name='complete_registration'),
+    path('set-password/', views.set_password, name='set_password'),
+    
+    # Восстановление пароля
+    path('reset-password/', views.reset_password, name='reset_password'),
+    path('set-new-password/', views.set_new_password, name='set_new_password'),
+    
+    # Старая аутентификация (для совместимости)
     path('register/', views.register, name='register'),
     path('login/', views.login_view, name='login'),
     path('logout/', views.logout_view, name='logout'),

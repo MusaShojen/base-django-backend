@@ -16,7 +16,10 @@ from .serializers import (
     UserRegistrationSerializer,
     UserLoginSerializer,
     UserSerializer,
-    TokenSerializer
+    TokenSerializer,
+    CompleteRegistrationSerializer,
+    SetPasswordSerializer,
+    ResetPasswordSerializer
 )
 from .services import GreenSMSService
 from .decorators import require_roles
@@ -65,7 +68,21 @@ def send_verification_code(request):
     
     if serializer.is_valid():
         phone = serializer.validated_data['phone']
+        is_reset = serializer.validated_data.get('is_reset', False)
         prefer_telegram = request.data.get('prefer_telegram', True)
+        
+        # Проверяем, зарегистрирован ли номер
+        user_exists = User.objects.filter(phone=phone).exists()
+        
+        if user_exists and not is_reset:
+            return Response({
+                'error': 'Номер уже зарегистрирован. Используйте is_reset=true для восстановления пароля'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        if not user_exists and is_reset:
+            return Response({
+                'error': 'Пользователь с таким номером не найден'
+            }, status=status.HTTP_404_NOT_FOUND)
         
         # Используем универсальный OTP сервис
         otp_service = UniversalOTPService()
@@ -81,7 +98,8 @@ def send_verification_code(request):
                 'phone': phone,
                 'method': result['method'],
                 'telegram_available': result['telegram_available'],
-                'fallback_required': result.get('fallback_required', False)
+                'fallback_required': result.get('fallback_required', False),
+                'is_reset': is_reset
             }, status=status.HTTP_200_OK)
         else:
             return Response({
@@ -734,3 +752,315 @@ def superadmin_panel(request):
         'message': 'Добро пожаловать в панель супер администратора!',
         'user': UserSerializer(request.user).data
     }, status=status.HTTP_200_OK)
+
+
+# Новые views для многоэтапной регистрации
+
+@swagger_auto_schema(
+    method='post',
+    operation_summary='Завершение регистрации пользователя',
+    operation_description='Создает пользователя после подтверждения кода (без пароля)',
+    request_body=CompleteRegistrationSerializer,
+    responses={
+        201: openapi.Response(
+            description='Пользователь создан, требуется установка пароля',
+            examples={
+                'application/json': {
+                    'message': 'Пользователь создан. Установите пароль для завершения регистрации',
+                    'user': {
+                        'id': 1,
+                        'phone': '+1234567890',
+                        'username': 'john_doe',
+                        'email': 'john@example.com',
+                        'first_name': 'John',
+                        'last_name': 'Doe',
+                        'should_update_password': True,
+                        'is_registration_complete': False
+                    }
+                }
+            }
+        ),
+        400: openapi.Response(
+            description='Ошибка валидации или неверный код',
+            examples={
+                'application/json': {
+                    'error': 'Неверный или истекший код'
+                }
+            }
+        )
+    }
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def complete_registration(request):
+    """Завершение регистрации пользователя (создание без пароля)"""
+    serializer = CompleteRegistrationSerializer(data=request.data)
+    
+    if serializer.is_valid():
+        phone = serializer.validated_data['phone']
+        code = serializer.validated_data['code']
+        
+        # Проверяем код
+        otp_service = UniversalOTPService()
+        if not otp_service.verify_code(phone, code):
+            return Response({
+                'error': 'Неверный или истекший код'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Удаляем код из Redis
+        SMSVerificationCache.delete_verification_code(phone)
+        
+        # Создаем пользователя
+        user_serializer = UserRegistrationSerializer(data=serializer.validated_data)
+        if user_serializer.is_valid():
+            user = user_serializer.save()
+            
+            return Response({
+                'message': 'Пользователь создан. Установите пароль для завершения регистрации',
+                'user': UserSerializer(user).data
+            }, status=status.HTTP_201_CREATED)
+        else:
+            return Response(user_serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@swagger_auto_schema(
+    method='post',
+    operation_summary='Установка пароля',
+    operation_description='Устанавливает пароль и завершает регистрацию пользователя',
+    request_body=SetPasswordSerializer,
+    responses={
+        200: openapi.Response(
+            description='Регистрация завершена успешно',
+            examples={
+                'application/json': {
+                    'message': 'Регистрация завершена успешно',
+                    'user': {
+                        'id': 1,
+                        'phone': '+1234567890',
+                        'username': 'john_doe',
+                        'email': 'john@example.com',
+                        'should_update_password': False,
+                        'is_registration_complete': True
+                    },
+                    'token': '12345678-1234-1234-1234-123456789abc'
+                }
+            }
+        ),
+        400: openapi.Response(
+            description='Ошибка валидации',
+            examples={
+                'application/json': {
+                    'password': ['Пароли не совпадают']
+                }
+            }
+        ),
+        404: openapi.Response(
+            description='Пользователь не найден',
+            examples={
+                'application/json': {
+                    'error': 'Пользователь не найден или регистрация уже завершена'
+                }
+            }
+        )
+    }
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def set_password(request):
+    """Установка пароля и завершение регистрации"""
+    serializer = SetPasswordSerializer(data=request.data)
+    
+    if serializer.is_valid():
+        phone = serializer.validated_data['phone']
+        password = serializer.validated_data['password']
+        
+        try:
+            user = User.objects.get(phone=phone, should_update_password=True)
+            
+            # Устанавливаем пароль
+            user.set_password(password)
+            user.complete_registration()  # Завершаем регистрацию
+            
+            # Создаем токен аутентификации
+            expires_at = timezone.now() + timedelta(days=30)
+            auth_token = AuthToken.objects.create(
+                user=user,
+                expires_at=expires_at
+            )
+            
+            return Response({
+                'message': 'Регистрация завершена успешно',
+                'user': UserSerializer(user).data,
+                'token': str(auth_token.token)
+            }, status=status.HTTP_200_OK)
+            
+        except User.DoesNotExist:
+            return Response({
+                'error': 'Пользователь не найден или регистрация уже завершена'
+            }, status=status.HTTP_404_NOT_FOUND)
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@swagger_auto_schema(
+    method='post',
+    operation_summary='Восстановление пароля',
+    operation_description='Инициирует процесс восстановления пароля',
+    request_body=ResetPasswordSerializer,
+    responses={
+        200: openapi.Response(
+            description='Код отправлен для восстановления пароля',
+            examples={
+                'application/json': {
+                    'message': 'Код отправлен для восстановления пароля',
+                    'phone': '+1234567890'
+                }
+            }
+        ),
+        404: openapi.Response(
+            description='Пользователь не найден',
+            examples={
+                'application/json': {
+                    'error': 'Пользователь с таким номером не найден'
+                }
+            }
+        )
+    }
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def reset_password(request):
+    """Восстановление пароля"""
+    serializer = ResetPasswordSerializer(data=request.data)
+    
+    if serializer.is_valid():
+        phone = serializer.validated_data['phone']
+        
+        try:
+            user = User.objects.get(phone=phone)
+            
+            # Устанавливаем флаг для обновления пароля
+            user.should_update_password = True
+            user.is_active = False  # Блокируем до установки нового пароля
+            user.save()
+            
+            # Отправляем код для восстановления
+            otp_service = UniversalOTPService()
+            result = otp_service.send_verification_code(phone, prefer_telegram=True)
+            
+            if result['success']:
+                # Сохраняем код в Redis
+                if result['sms_verification']:
+                    SMSVerificationCache.store_verification_code(phone, result['sms_verification'].code)
+                
+                return Response({
+                    'message': 'Код отправлен для восстановления пароля',
+                    'phone': phone,
+                    'method': result['method']
+                }, status=status.HTTP_200_OK)
+            else:
+                return Response({
+                    'error': result['message']
+                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                
+        except User.DoesNotExist:
+            return Response({
+                'error': 'Пользователь с таким номером не найден'
+            }, status=status.HTTP_404_NOT_FOUND)
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@swagger_auto_schema(
+    method='post',
+    operation_summary='Установка нового пароля',
+    operation_description='Устанавливает новый пароль после восстановления',
+    request_body=SetPasswordSerializer,
+    responses={
+        200: openapi.Response(
+            description='Пароль успешно изменен',
+            examples={
+                'application/json': {
+                    'message': 'Пароль успешно изменен',
+                    'user': {
+                        'id': 1,
+                        'phone': '+1234567890',
+                        'should_update_password': False,
+                        'is_registration_complete': True
+                    },
+                    'token': '12345678-1234-1234-1234-123456789abc'
+                }
+            }
+        ),
+        400: openapi.Response(
+            description='Ошибка валидации',
+            examples={
+                'application/json': {
+                    'error': 'Неверный или истекший код'
+                }
+            }
+        ),
+        404: openapi.Response(
+            description='Пользователь не найден',
+            examples={
+                'application/json': {
+                    'error': 'Пользователь не найден'
+                }
+            }
+        )
+    }
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def set_new_password(request):
+    """Установка нового пароля после восстановления"""
+    serializer = SetPasswordSerializer(data=request.data)
+    
+    if serializer.is_valid():
+        phone = serializer.validated_data['phone']
+        password = serializer.validated_data['password']
+        code = request.data.get('code')  # Код для подтверждения
+        
+        if not code:
+            return Response({
+                'error': 'Код подтверждения обязателен'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Проверяем код
+        otp_service = UniversalOTPService()
+        if not otp_service.verify_code(phone, code):
+            return Response({
+                'error': 'Неверный или истекший код'
+            }, status=status.HTTP_400_BAD_REQUEST)
+        
+        # Удаляем код из Redis
+        SMSVerificationCache.delete_verification_code(phone)
+        
+        try:
+            user = User.objects.get(phone=phone, should_update_password=True)
+            
+            # Устанавливаем новый пароль
+            user.set_password(password)
+            user.complete_registration()  # Завершаем восстановление
+            
+            # Создаем токен аутентификации
+            expires_at = timezone.now() + timedelta(days=30)
+            auth_token = AuthToken.objects.create(
+                user=user,
+                expires_at=expires_at
+            )
+            
+            return Response({
+                'message': 'Пароль успешно изменен',
+                'user': UserSerializer(user).data,
+                'token': str(auth_token.token)
+            }, status=status.HTTP_200_OK)
+            
+        except User.DoesNotExist:
+            return Response({
+                'error': 'Пользователь не найден'
+            }, status=status.HTTP_404_NOT_FOUND)
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)

@@ -14,6 +14,8 @@ class User(AbstractUser):
     phone = models.CharField(max_length=20, unique=True, verbose_name='Номер телефона')
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='user', verbose_name='Роль')
     is_phone_verified = models.BooleanField(default=False, verbose_name='Телефон подтвержден')
+    should_update_password = models.BooleanField(default=True, verbose_name='Требуется обновление пароля')
+    registration_completed_at = models.DateTimeField(null=True, blank=True, verbose_name='Дата завершения регистрации')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата создания')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='Дата обновления')
     
@@ -42,3 +44,20 @@ class User(AbstractUser):
     def is_superadmin(self):
         """Проверяет, является ли пользователь супер администратором"""
         return self.role == 'superadmin'
+    
+    def is_registration_complete(self):
+        """Проверяет, завершена ли регистрация пользователя"""
+        return not self.should_update_password and self.is_active and self.is_phone_verified
+    
+    def can_use_service(self):
+        """Проверяет, может ли пользователь пользоваться сервисом"""
+        return self.is_registration_complete()
+    
+    def complete_registration(self):
+        """Завершает регистрацию пользователя"""
+        from django.utils import timezone
+        self.should_update_password = False
+        self.is_active = True
+        self.is_phone_verified = True
+        self.registration_completed_at = timezone.now()
+        self.save()
