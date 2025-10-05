@@ -10,6 +10,7 @@ class SMSVerification(models.Model):
     
     phone = models.CharField(max_length=20, verbose_name='Номер телефона')
     code = models.CharField(max_length=6, verbose_name='Код подтверждения')
+    request_id = models.CharField(max_length=100, blank=True, null=True, verbose_name='ID запроса SMS')
     is_used = models.BooleanField(default=False, verbose_name='Использован')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='Дата создания')
     expires_at = models.DateTimeField(verbose_name='Дата истечения')
@@ -30,6 +31,15 @@ class SMSVerification(models.Model):
     def is_valid(self):
         """Проверяет, действителен ли код"""
         return not self.is_used and not self.is_expired()
+    
+    def get_sms_status(self):
+        """Получает статус SMS через сервис"""
+        if not self.request_id:
+            return "no_request_id"
+        
+        from .services import GreenSMSService
+        sms_service = GreenSMSService()
+        return sms_service.get_sms_status(self.request_id)
 
 
 class AuthToken(models.Model):

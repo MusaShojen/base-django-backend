@@ -21,6 +21,7 @@ from .serializers import (
 from .services import GreenSMSService
 from .decorators import require_roles
 from .cache_utils import CacheManager, RateLimiter, SMSVerificationCache
+from .otp_service import UniversalOTPService
 
 
 @swagger_auto_schema(
@@ -59,39 +60,32 @@ from .cache_utils import CacheManager, RateLimiter, SMSVerificationCache
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def send_verification_code(request):
-    """Отправка SMS кода подтверждения"""
+    """Отправка кода подтверждения через Telegram или SMS"""
     serializer = PhoneVerificationSerializer(data=request.data)
     
     if serializer.is_valid():
         phone = serializer.validated_data['phone']
+        prefer_telegram = request.data.get('prefer_telegram', True)
         
-        # Проверяем rate limiting
-        if not RateLimiter.check_rate_limit(phone, limit=5, window=3600):
-            return Response({
-                'error': 'Превышен лимит запросов. Попробуйте позже.'
-            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
+        # Используем универсальный OTP сервис
+        otp_service = UniversalOTPService()
+        result = otp_service.send_verification_code(phone, prefer_telegram=prefer_telegram)
         
-        # Проверяем количество попыток
-        if not SMSVerificationCache.increment_attempts(phone, max_attempts=5):
-            return Response({
-                'error': 'Превышено максимальное количество попыток. Попробуйте через час.'
-            }, status=status.HTTP_429_TOO_MANY_REQUESTS)
-        
-        # Отправляем SMS код
-        sms_service = GreenSMSService()
-        sms_verification = sms_service.send_verification_code(phone)
-        
-        if sms_verification:
+        if result['success']:
             # Сохраняем код в Redis
-            SMSVerificationCache.store_verification_code(phone, sms_verification.code)
+            if result['sms_verification']:
+                SMSVerificationCache.store_verification_code(phone, result['sms_verification'].code)
             
             return Response({
-                'message': 'Код подтверждения отправлен на ваш номер телефона',
-                'phone': phone
+                'message': result['message'],
+                'phone': phone,
+                'method': result['method'],
+                'telegram_available': result['telegram_available'],
+                'fallback_required': result.get('fallback_required', False)
             }, status=status.HTTP_200_OK)
         else:
             return Response({
-                'error': 'Ошибка отправки SMS кода'
+                'error': result['message']
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
@@ -126,16 +120,21 @@ def send_verification_code(request):
 @api_view(['POST'])
 @permission_classes([AllowAny])
 def verify_code(request):
-    """Проверка SMS кода подтверждения"""
+    """Проверка кода подтверждения"""
     serializer = CodeVerificationSerializer(data=request.data)
     
     if serializer.is_valid():
         phone = serializer.validated_data['phone']
         code = serializer.validated_data['code']
         
-        # Проверяем код
-        sms_service = GreenSMSService()
-        if sms_service.verify_code(phone, code):
+        # Используем универсальный OTP сервис
+        otp_service = UniversalOTPService()
+        is_valid = otp_service.verify_code(phone, code)
+        
+        if is_valid:
+            # Удаляем код из Redis
+            SMSVerificationCache.delete_verification_code(phone)
+            
             return Response({
                 'message': 'Код подтвержден успешно',
                 'phone': phone,
@@ -147,6 +146,151 @@ def verify_code(request):
             }, status=status.HTTP_400_BAD_REQUEST)
     
     return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@swagger_auto_schema(
+    method='post',
+    operation_summary='Отправка SMS кода (резервный вариант)',
+    operation_description='Отправляет SMS код как резервный вариант, если Telegram недоступен',
+    request_body=PhoneVerificationSerializer,
+    responses={
+        200: openapi.Response(
+            description='SMS код отправлен',
+            examples={
+                'application/json': {
+                    'message': 'Код отправлен по SMS',
+                    'phone': '+1234567890'
+                }
+            }
+        ),
+        400: openapi.Response(
+            description='Ошибка валидации',
+            examples={
+                'application/json': {
+                    'phone': ['Неверный формат']
+                }
+            }
+        ),
+        500: openapi.Response(
+            description='Ошибка отправки',
+            examples={
+                'application/json': {
+                    'error': 'Ошибка отправки SMS'
+                }
+            }
+        )
+    }
+)
+@api_view(['POST'])
+@permission_classes([AllowAny])
+def send_sms_fallback(request):
+    """Отправка SMS кода как резервный вариант"""
+    serializer = PhoneVerificationSerializer(data=request.data)
+    
+    if serializer.is_valid():
+        phone = serializer.validated_data['phone']
+        
+        # Используем универсальный OTP сервис для SMS fallback
+        otp_service = UniversalOTPService()
+        result = otp_service.send_sms_fallback(phone)
+        
+        if result['success']:
+            return Response({
+                'message': result['message'],
+                'phone': phone
+            }, status=status.HTTP_200_OK)
+        else:
+            return Response({
+                'error': result['message']
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+    
+    return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary='Проверка доступности Telegram',
+    operation_description='Проверяет, доступен ли Telegram для указанного номера телефона',
+    manual_parameters=[
+        openapi.Parameter(
+            'phone',
+            openapi.IN_QUERY,
+            description="Номер телефона",
+            type=openapi.TYPE_STRING,
+            required=True
+        )
+    ],
+    responses={
+        200: openapi.Response(
+            description='Результат проверки',
+            examples={
+                'application/json': {
+                    'telegram_available': True,
+                    'phone': '+1234567890'
+                }
+            }
+        ),
+        400: openapi.Response(
+            description='Ошибка валидации',
+            examples={
+                'application/json': {
+                    'error': 'Неверный формат номера'
+                }
+            }
+        )
+    }
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def check_telegram_availability(request):
+    """Проверка доступности Telegram для номера"""
+    phone = request.GET.get('phone')
+    
+    if not phone:
+        return Response({
+            'error': 'Номер телефона обязателен'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Проверяем формат номера (базовая валидация)
+    if not phone.startswith('+') or len(phone) < 10:
+        return Response({
+            'error': 'Неверный формат номера телефона'
+        }, status=status.HTTP_400_BAD_REQUEST)
+    
+    # Используем универсальный OTP сервис
+    otp_service = UniversalOTPService()
+    telegram_available = otp_service.check_telegram_availability(phone)
+    
+    return Response({
+        'telegram_available': telegram_available,
+        'phone': phone
+    }, status=status.HTTP_200_OK)
+
+
+@swagger_auto_schema(
+    method='get',
+    operation_summary='Информация о балансах',
+    operation_description='Получает информацию о балансах Telegram и SMS сервисов',
+    responses={
+        200: openapi.Response(
+            description='Информация о балансах',
+            examples={
+                'application/json': {
+                    'telegram_available': True,
+                    'sms_balance': 100.0
+                }
+            }
+        )
+    }
+)
+@api_view(['GET'])
+@permission_classes([AllowAny])
+def get_balance_info(request):
+    """Получение информации о балансах"""
+    otp_service = UniversalOTPService()
+    balance_info = otp_service.get_balance_info()
+    
+    return Response(balance_info, status=status.HTTP_200_OK)
 
 
 @swagger_auto_schema(

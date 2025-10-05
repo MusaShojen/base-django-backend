@@ -172,9 +172,15 @@ SESSION_CACHE_ALIAS = 'default'
 SESSION_COOKIE_AGE = 86400  # 24 часа
 
 # Green SMS API settings
-GREEN_SMS_API_URL = config('GREEN_SMS_API_URL', default='https://api.green-api.com')
-GREEN_SMS_API_TOKEN = config('GREEN_SMS_API_TOKEN', default='')
+GREEN_SMS_USER = config('GREEN_SMS_USER', default='test')
+GREEN_SMS_PASSWORD = config('GREEN_SMS_PASSWORD', default='test')
 GREEN_SMS_DEBUG = config('GREEN_SMS_DEBUG', default=True, cast=bool)
+
+# Telegram Gateway API settings
+TELEGRAM_GATEWAY_ENABLED = config('TELEGRAM_GATEWAY_ENABLED', default=True, cast=bool)
+TELEGRAM_GATEWAY_TOKEN = config('TELEGRAM_GATEWAY_TOKEN', default='')
+TELEGRAM_GATEWAY_URL = 'https://gatewayapi.telegram.org'
+TELEGRAM_GATEWAY_DEBUG = config('TELEGRAM_GATEWAY_DEBUG', default=True, cast=bool)
 
 # Swagger settings
 SWAGGER_SETTINGS = {
