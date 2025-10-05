@@ -251,11 +251,7 @@ def check_telegram_availability(request):
             'error': 'Номер телефона обязателен'
         }, status=status.HTTP_400_BAD_REQUEST)
     
-    # Проверяем формат номера (базовая валидация)
-    if not phone.startswith('+') or len(phone) < 10:
-        return Response({
-            'error': 'Неверный формат номера телефона'
-        }, status=status.HTTP_400_BAD_REQUEST)
+    # Валидация номера телефона уже выполняется в сериализаторе
     
     # Используем универсальный OTP сервис
     otp_service = UniversalOTPService()

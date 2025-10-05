@@ -1,28 +1,47 @@
 from rest_framework import serializers
 from django.contrib.auth import get_user_model
 from .models import SMSVerification, AuthToken
+from .validators import validate_phone_number, normalize_phone_number
 
 User = get_user_model()
 
 
 class PhoneVerificationSerializer(serializers.Serializer):
     """Сериализатор для запроса SMS кода"""
-    phone = serializers.CharField(max_length=20, help_text='Номер телефона')
+    phone = serializers.CharField(max_length=20, help_text='Номер телефона в международном формате E.164 (например: +1234567890)')
     
     def validate_phone(self, value):
         """Валидация номера телефона"""
-        # Простая валидация - можно расширить
-        if not value.startswith('+'):
-            raise serializers.ValidationError("Номер телефона должен начинаться с '+'")
-        if len(value) < 10:
-            raise serializers.ValidationError("Номер телефона слишком короткий")
-        return value
+        try:
+            # Нормализуем номер
+            normalized_phone = normalize_phone_number(value)
+            return normalized_phone
+        except Exception as e:
+            raise serializers.ValidationError(
+                'Номер телефона должен быть в международном формате E.164 '
+                '(например: +1234567890, +79123456789). '
+                f'Ошибка: {str(e)}'
+            )
+    
 
 
 class CodeVerificationSerializer(serializers.Serializer):
     """Сериализатор для проверки SMS кода"""
-    phone = serializers.CharField(max_length=20, help_text='Номер телефона')
+    phone = serializers.CharField(max_length=20, help_text='Номер телефона в международном формате E.164')
     code = serializers.CharField(max_length=6, help_text='Код подтверждения')
+    
+    def validate_phone(self, value):
+        """Валидация номера телефона"""
+        try:
+            # Нормализуем номер
+            normalized_phone = normalize_phone_number(value)
+            return normalized_phone
+        except Exception as e:
+            raise serializers.ValidationError(
+                'Номер телефона должен быть в международном формате E.164 '
+                '(например: +1234567890, +79123456789). '
+                f'Ошибка: {str(e)}'
+            )
     
     def validate_code(self, value):
         """Валидация кода"""
